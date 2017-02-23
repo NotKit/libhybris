@@ -253,6 +253,7 @@ AC_CONFIG_FILES([
 	egl/platforms/wayland/Makefile
 	egl/platforms/hwcomposer/Makefile
 	egl/platforms/hwcomposer/hwcomposer-egl.pc
+	egl/platforms/x11/Makefile
 	glesv1/glesv1_cm.pc
 	glesv1/Makefile
 	glesv2/glesv2.pc
