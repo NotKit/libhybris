@@ -82,6 +82,7 @@ X11NativeWindow::X11NativeWindow(alloc_device_t* alloc,
 	m_bufferCount = 0;
 	m_allocateBuffers = true;
 	m_image = 0;
+	m_useShm = true;
 
 	setBufferCount(FRAMEBUFFER_PARTITIONS);
 
@@ -112,6 +113,13 @@ X11NativeWindow::X11NativeWindow(alloc_device_t* alloc,
 	{
 		m_height = atoi(env);
 		TRACE("forced height=%d", m_height);
+	}
+
+	env = getenv("HYBRIS_X11_DISABLE_SHM");
+	if (env != NULL)
+	{
+		m_useShm = false;
+		TRACE("won't use MIT-SHM");
 	}
 
 	XGCValues gcvalues;
@@ -596,16 +604,46 @@ int X11NativeWindow::postBuffer(ANativeWindowBuffer *buf) {
 
 	if (!m_image)
 	{
-		m_image = XCreateImage(m_display,
-							CopyFromParent,
-							32,
-							ZPixmap, 0, (char *)vaddr, buf->stride, buf->height, 32, 0);
+		if (m_useShm)
+		{
+			m_image = XShmCreateImage(m_display,
+						CopyFromParent,
+						32,
+						ZPixmap, 0, &m_shminfo, buf->stride, buf->height);
+
+			m_shminfo.shmid = shmget(IPC_PRIVATE,
+				m_image->bytes_per_line * m_image->height,
+				IPC_CREAT|0777);
+
+			m_shminfo.shmaddr = m_image->data = (char *)shmat(m_shminfo.shmid, 0, 0);
+			m_shminfo.readOnly = 0;
+
+			TRACE("m_shminfo.shmaddr %p", m_shminfo.shmaddr);
+
+			XShmAttach(m_display, &m_shminfo);
+		}
+		else
+		{
+			m_image = XCreateImage(m_display,
+								CopyFromParent,
+								32,
+								ZPixmap, 0, (char *)vaddr, buf->stride, buf->height, 32, 0);
+		}
 	}
 
-	m_image->data = (char *)vaddr;
-	XPutImage(m_display, m_window, m_gc, m_image, 0, 0, 0, 0, m_width, m_height);
 
-	m_gralloc->unlock(m_gralloc, buf->handle);
+	if (m_useShm)
+	{
+		memcpy(m_image->data, vaddr, m_image->bytes_per_line * m_image->height);
+		m_gralloc->unlock(m_gralloc, buf->handle);
+		XShmPutImage(m_display, m_window, m_gc, m_image, 0, 0, 0, 0, m_width, m_height, 0);
+	}
+	else
+	{
+		m_image->data = (char *)vaddr;
+		XPutImage(m_display, m_window, m_gc, m_image, 0, 0, 0, 0, m_width, m_height);
+		m_gralloc->unlock(m_gralloc, buf->handle);
+	}
 }
 
 // vim: noai:ts=4:sw=4:ss=4:expandtab

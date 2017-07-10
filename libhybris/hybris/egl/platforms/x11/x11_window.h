@@ -21,6 +21,8 @@
 #include <linux/fb.h>
 #include <hardware/gralloc.h>
 #include <X11/Xlib.h>
+#include <sys/shm.h>
+#include <X11/extensions/XShm.h>
 #include <list>
 
 
@@ -82,7 +84,9 @@ private:
 	Window m_window;
 	int m_width, m_height;
 	XImage *m_image;
+	XShmSegmentInfo m_shminfo;
 	GC m_gc;
+	bool m_useShm;
 
 	alloc_device_t* m_alloc;
 	gralloc_module_t* m_gralloc;
