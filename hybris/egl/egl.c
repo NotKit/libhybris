@@ -228,7 +228,6 @@ const char * eglQueryString(EGLDisplay dpy, EGLint name)
 
 HYBRIS_IMPLEMENT_FUNCTION4(egl, EGLBoolean, eglGetConfigs, EGLDisplay, EGLConfig *, EGLint, EGLint *);
 HYBRIS_IMPLEMENT_FUNCTION5(egl, EGLBoolean, eglChooseConfig, EGLDisplay, const EGLint *, EGLConfig *, EGLint, EGLint *);
-HYBRIS_IMPLEMENT_FUNCTION4(egl, EGLBoolean, eglGetConfigAttrib, EGLDisplay, EGLConfig, EGLint, EGLint *);
 
 EGLSurface eglCreateWindowSurface(EGLDisplay dpy, EGLConfig config,
 		EGLNativeWindowType win,
@@ -459,6 +458,18 @@ EGLBoolean eglDestroyImageKHR(EGLDisplay dpy, EGLImageKHR image)
 		return EGL_TRUE;
 	}
 	return ret;
+}
+
+EGLBoolean eglGetConfigAttrib(EGLDisplay dpy, EGLConfig config, EGLint attribute, EGLint *value)
+{
+	HYBRIS_DLSYSM(egl, &_eglGetConfigAttrib, "eglGetConfigAttrib");
+	struct _EGLDisplay *display = hybris_egl_display_get_mapping(dpy);
+
+    EGLBoolean ret = ws_eglGetConfigAttrib(display, config, attribute, value);
+    if (ret == EGL_FALSE) {
+        return (*_eglGetConfigAttrib)(dpy, config, attribute, value);
+    }
+    return ret;
 }
 
 // vim:ts=4:sw=4:noexpandtab
