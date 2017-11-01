@@ -33,6 +33,7 @@
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 __BEGIN_DECLS
 
@@ -73,7 +74,17 @@ struct abort_msg_t {
 // Formats a message to the log (priority 'fatal'), then aborts.
 //
 
+#ifdef __GLIBC__
  void __libc_fatal(const char* format, ...);
+#else
+void inline __libc_fatal(const char* format, ...)
+{
+  va_list ap;
+  va_start(ap, format);
+  vfprintf(stderr, format, ap);
+  va_end(ap);
+}
+#endif
 
 //
 // Formats a message to the log (priority 'fatal'), but doesn't abort.

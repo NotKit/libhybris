@@ -3,7 +3,7 @@ lib_LTLIBRARIES = \
 
 SUBDIRS =
 
-if !WANT_ARCH_ARM64
+if !WANT_EXPERIMENTAL
 SUBDIRS += jb
 endif
 

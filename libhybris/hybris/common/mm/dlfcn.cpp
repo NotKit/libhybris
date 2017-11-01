@@ -31,6 +31,10 @@
 
 #include "hybris_compat.h"
 
+#ifndef PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP
+#define PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP {{PTHREAD_MUTEX_RECURSIVE}}
+#endif
+
 /* This file hijacks the symbols stubbed out in libdl.so. */
 
 static __thread const char *dl_err_str;

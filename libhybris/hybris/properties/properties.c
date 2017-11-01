@@ -36,6 +36,9 @@
 #include <poll.h>
 
 #include <hybris/properties/properties.h>
+#ifndef __GLIBC__
+#include <hybris/common/musl_compat.h>
+#endif
 #include "properties_p.h"
 
 
