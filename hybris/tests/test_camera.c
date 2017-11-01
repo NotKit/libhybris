@@ -40,6 +40,10 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#ifndef __GLIBC__
+#include <hybris/common/musl_compat.h>
+#endif
+
 int shot_counter = 1;
 int32_t current_zoom_level = 1;
 bool new_camera_frame_available = true;

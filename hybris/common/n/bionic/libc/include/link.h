@@ -29,6 +29,7 @@
 #define _LINK_H_
 
 #include <sys/types.h>
+#include <sys/cdefs.h>
 #include <elf.h>
 
 __BEGIN_DECLS

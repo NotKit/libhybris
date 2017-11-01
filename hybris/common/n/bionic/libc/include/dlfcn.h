@@ -46,8 +46,8 @@ typedef struct {
 extern void* dlopen(const char*  filename, int flag);
 extern int dlclose(void*  handle);
 extern const char* dlerror(void);
-extern void* dlsym(void* handle, const char* symbol) __nonnull((2));
-extern void* dlvsym(void* handle, const char* symbol, const char* version) __nonnull((2, 3));
+extern void* dlsym(void* handle, const char* symbol) __attribute__((nonnull((2))));
+extern void* dlvsym(void* handle, const char* symbol, const char* version) __attribute__((nonnull((2, 3))));
 extern int dladdr(const void* addr, Dl_info *info);
 
 enum {

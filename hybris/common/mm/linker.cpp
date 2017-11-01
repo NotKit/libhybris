@@ -38,6 +38,9 @@
 #include <sys/mman.h>
 #include <sys/param.h>
 #include <unistd.h>
+#ifndef __GLIBC__
+#include <libgen.h>
+#endif
 
 #include <new>
 #include <string>
@@ -1169,7 +1172,11 @@ static const char* fix_dt_needed(const char* dt_needed, const char* sopath) {
 #if !defined(__LP64__)
   // Work around incorrect DT_NEEDED entries for old apps: http://b/21364029
   if (get_application_target_sdk_version() <= 22) {
+#ifdef __GLIBC__
     const char* bname = basename(dt_needed);
+#else
+    const char* bname = (const char*) basename((char*)dt_needed);
+#endif
     if (bname != dt_needed) {
       DL_WARN("'%s' library has invalid DT_NEEDED entry '%s'", sopath, dt_needed);
     }
@@ -2900,7 +2907,11 @@ bool soinfo::prelink_image() {
   // the main executable and linker; they do not need to have dt_soname
   if (soname_ == nullptr && this != somain && (flags_ & FLAG_LINKER) == 0 &&
       get_application_target_sdk_version() <= 22) {
+#ifdef __GLIBC__
     soname_ = basename(realpath_.c_str());
+#else
+    soname_ = (const char*) basename((char*) realpath_.c_str());
+#endif
     DL_WARN("%s: is missing DT_SONAME will use basename as a replacement: \"%s\"",
         get_realpath(), soname_);
   }

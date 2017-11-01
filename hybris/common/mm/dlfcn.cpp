@@ -31,6 +31,10 @@
 
 #include "hybris_compat.h"
 
+#ifndef PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP
+#define PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP {{PTHREAD_MUTEX_RECURSIVE}}
+#endif
+
 #ifdef WANT_ARM_TRACING
 #include "../wrappers.h"
 #endif
