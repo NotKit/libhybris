@@ -49,17 +49,6 @@ void X11NativeWindow::resize(unsigned int width, unsigned int height)
     unlock();
 }
 
-// void X11NativeWindow::resize_callback(struct wl_egl_window *egl_window, void *)
-// {
-//     TRACE("%dx%d",egl_window->width,egl_window->height);
-//     ((X11NativeWindow *) egl_window->nativewindow)->resize(egl_window->width, egl_window->height);
-// }
-// 
-// void X11NativeWindow::free_callback(struct wl_egl_window *egl_window, void *)
-// {
-//     ((X11NativeWindow*)(egl_window->nativewindow))->m_window = 0;
-// }
-
 void X11NativeWindow::lock()
 {
     pthread_mutex_lock(&this->mutex);
@@ -257,61 +246,6 @@ int X11NativeWindow::lockBuffer(BaseNativeWindowBuffer* buffer){
     X11NativeWindowBuffer *wnb = (X11NativeWindowBuffer*) buffer;
     HYBRIS_TRACE_BEGIN("x11-platform", "lockBuffer", "-%p", wnb);
     HYBRIS_TRACE_END("x11-platform", "lockBuffer", "-%p", wnb);
-    return NO_ERROR;
-}
-
-int X11NativeWindow::postBuffer(ANativeWindowBuffer* buffer)
-{
-    TRACE("");
-    X11NativeWindowBuffer *wnb = NULL;
-
-    lock();
-    std::list<X11NativeWindowBuffer *>::iterator it = post_registered.begin();
-    for (; it != post_registered.end(); it++)
-    {
-        if ((*it)->other == buffer)
-        {
-            wnb = (*it);
-            break;
-        }
-    }
-    unlock();
-    if (!wnb)
-    {
-        wnb = new X11NativeWindowBuffer(buffer);
-
-        wnb->common.incRef(&wnb->common);
-        buffer->common.incRef(&buffer->common);
-    }
-
-    int ret = 0;
-
-    lock();
-    wnb->busy = 1;
-    ret = readQueue(false);
-
-    if (ret < 0) {
-        unlock();
-        return ret;
-    }
-
-//     if (wnb->wlbuffer == NULL)
-//     {
-//         wnb->wlbuffer_from_native_handle(m_android_wlegl, m_display, wl_queue);
-//         TRACE("%p add listener with %p inside", wnb, wnb->wlbuffer);
-//         wl_buffer_add_listener(wnb->wlbuffer, &wl_buffer_listener, this);
-//         wl_proxy_set_queue((struct wl_proxy *) wnb->wlbuffer, this->wl_queue);
-//         post_registered.push_back(wnb);
-//     }
-    TRACE("%p DAMAGE AREA: %dx%d", wnb, wnb->width, wnb->height);
-//     wl_surface_attach(m_window->surface, wnb->wlbuffer, 0, 0);
-//     wl_surface_damage(m_window->surface, 0, 0, wnb->width, wnb->height);
-//     wl_surface_commit(m_window->surface);
-//     wl_display_flush(m_display);
-
-    posted.push_back(wnb);
-    unlock();
-
     return NO_ERROR;
 }
 
