@@ -1,3 +1,4 @@
 [submodule "libhybris"]
 	path = libhybris
-	url = https://github.com/libhybris/libhybris
+	url = https://github.com/NotKit/libhybris
+	branch = hermes

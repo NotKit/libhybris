@@ -268,10 +268,11 @@ autoreconf -v -f -i
 %endif
 %ifarch %{aarch64}
   --enable-arch=arm64 \
-  --with-default-hybris-ld-library-path=/usr/libexec/droid-hybris/system/lib64:/vendor/lib64:/system/lib64:/odm/lib64
+  --with-default-hybris-ld-library-path=/usr/libexec/droid-hybris/system/lib64:/vendor/lib64:/system/lib64:/odm/lib64 \
 %else
-  --with-default-hybris-ld-library-path=/usr/libexec/droid-hybris/system/lib:/vendor/lib:/system/lib:/odm/lib
+  --with-default-hybris-ld-library-path=/usr/libexec/droid-hybris/system/lib:/vendor/lib:/system/lib:/odm/lib \
 %endif
+  --with-default-hybris-ld-shim-libs="/system/lib/libc.so|libshim_c.so:/system/lib64/libc.so|libshim_c.so:/usr/libexec/droid-hybris/system/lib/libc.so|libshim_c.so:/system/lib/libmedia.so|libshim_media.so:/system/lib64/libmedia.so|libshim_media.so:/system/lib/libstagefright.so|libshim_stagefright.so:/system/lib64/libstagefright.so|libshim_stagefright.so:/system/lib/libui.so|libshim_ui.so:/system/lib64/libui.so|libshim_ui.so:/usr/libexec/droid-hybris/system/lib/libui.so|libshim_ui.so:/system/lib/libmedia.so|libshim_wvm.so:/system/lib/liblog.so|libshim_xlog.so:/system/lib64/liblog.so|libshim_xlog.so:/usr/libexec/droid-hybris/system/lib/liblog.so|libshim_xlog.so"
 
 make
 
