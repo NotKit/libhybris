@@ -147,6 +147,13 @@ AC_ARG_WITH(default-hybris-ld-library-path,
   [ ])
 AC_SUBST(DEFAULT_HYBRIS_LD_LIBRARY_PATH)
 
+DEFAULT_HYBRIS_LD_SHIM_LIBS=""
+AC_ARG_WITH(default-hybris-ld-shim-libs,
+  [  --with-default-hybris-ld-shim-libs=PATH1|LIB1:PATH2|LIB2:...     Use PATH1|LIB1:PATH2|LIB2 for default HYBRIS_LD_SHIM_LIBS if not specified by environment ],
+  [ DEFAULT_HYBRIS_LD_SHIM_LIBS="$withval" ],
+  [ ])
+AC_SUBST(DEFAULT_HYBRIS_LD_SHIM_LIBS)
+
 AC_ARG_WITH(android-headers,
   [  --with-android-headers=DIR     Use android headers available in DIR. See utils/extract-headers.sh ],
   [

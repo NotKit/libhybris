@@ -4418,7 +4418,11 @@ static ElfW(Addr) __linker_init_post_relocation(KernelArgumentBlock& args, ElfW(
     if (ldpreload_env != nullptr) {
       INFO("[ LD_PRELOAD set to \"%s\" ]", ldpreload_env);
     }
-    ldshim_libs_env = getenv("LD_SHIM_LIBS");
+  }
+  if (strlen(DEFAULT_HYBRIS_LD_SHIM_LIBS)) {
+     ldshim_libs_env = DEFAULT_HYBRIS_LD_SHIM_LIBS;
+  } else {
+     ldshim_libs_env = getenv("HYBRIS_LD_SHIM_LIBS");
   }
 
   struct stat file_stat;
@@ -4637,6 +4641,11 @@ extern "C" void android_linker_init(int sdk_version, void* (*get_hooked_symbol)(
   if (!getauxval(AT_SECURE)) {
     ldpath_env = getenv("HYBRIS_LD_LIBRARY_PATH");
     ldpreload_env = getenv("HYBRIS_LD_PRELOAD");
+  }
+
+  if (strlen(DEFAULT_HYBRIS_LD_SHIM_LIBS)) {
+    ldshim_libs_env = DEFAULT_HYBRIS_LD_SHIM_LIBS;
+  } else {
     ldshim_libs_env = getenv("HYBRIS_LD_SHIM_LIBS");
   }
 
