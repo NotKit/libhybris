@@ -53,10 +53,13 @@ extern "C" {
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include "xcb_drihybris.h"
 
 static gralloc_module_t *gralloc = 0;
 static alloc_device_t *alloc = 0;
-
+static Display *x11_display = NULL;
+static xcb_connection_t *xcb_connection = NULL;
+static bool have_dri_hybris = false;
 
 static const char *  (*_eglQueryString)(EGLDisplay dpy, EGLint name) = NULL;
 static __eglMustCastToProperFunctionPointerType (*_eglGetProcAddress)(const char *procname) = NULL;
@@ -110,6 +113,19 @@ extern "C" _EGLDisplay *x11ws_GetDisplay(EGLNativeDisplayType display)
 	X11Display *xdpy = new X11Display;
 	xdpy->xl_display = (Display *)display;
 
+	if (!x11_display && xdpy->xl_display) {
+		x11_display = xdpy->xl_display;
+
+		// Check if we have drihybris support
+		xcb_connection = XGetXCBConnection(x11_display);
+		const xcb_query_extension_reply_t *extension;
+
+		xcb_prefetch_extension_data (xcb_connection, &xcb_drihybris_id);
+		extension = xcb_get_extension_data(xcb_connection, &xcb_drihybris_id);
+		if (extension && extension->present)
+			have_dri_hybris = true;
+	}
+
 	return &xdpy->base;
 }
 
@@ -133,7 +149,8 @@ extern "C" EGLNativeWindowType x11ws_CreateWindow(EGLNativeWindowType win, _EGLD
 		abort();
 	}
 
-	X11NativeWindow *window = new X11NativeWindow(xdpy->xl_display, xlib_window, alloc, gralloc);
+	X11NativeWindow *window = new X11NativeWindow(xdpy->xl_display, xlib_window,
+												alloc, gralloc, have_dri_hybris);
 	window->common.incRef(&window->common);
 	return (EGLNativeWindowType) static_cast<struct ANativeWindow *>(window);
 }
@@ -149,8 +166,49 @@ extern "C" __eglMustCastToProperFunctionPointerType x11ws_eglGetProcAddress(cons
 	return eglplatformcommon_eglGetProcAddress(procname);
 }
 
+extern "C" EGLBoolean eglplatformcommon_eglHybrisCreateRemoteBuffer(EGLint width, EGLint height, EGLint usage, EGLint format, EGLint stride,
+																	int num_ints, int *ints, int num_fds, int *fds, EGLClientBuffer *buffer);
+
 extern "C" void x11ws_passthroughImageKHR(EGLContext *ctx, EGLenum *target, EGLClientBuffer *buffer, const EGLint **attrib_list)
 {
+	static int debugenvchecked = 0;
+	if (*target == EGL_NATIVE_PIXMAP_KHR && have_dri_hybris)
+	{
+		TRACE("target: EGL_NATIVE_PIXMAP_KHR");
+		xcb_drihybris_buffer_from_pixmap_cookie_t bp_cookie;
+		xcb_drihybris_buffer_from_pixmap_reply_t  *bp_reply;
+		xcb_drawable_t drawable = (xcb_drawable_t) (uintptr_t) *buffer;
+
+		bp_cookie = xcb_drihybris_buffer_from_pixmap(xcb_connection,
+													drawable);
+
+		bp_reply = xcb_drihybris_buffer_from_pixmap_reply(xcb_connection,
+														bp_cookie, &error);
+
+		if (bp_reply) {
+			EGLClientBuffer buf;
+
+			eglplatformcommon_eglHybrisCreateRemoteBuffer(
+				bp_reply->width, bp_reply->height, GRALLOC_USAGE_HW_TEXTURE,
+				HAL_PIXEL_FORMAT_RGBA_8888, bp_reply->stride,
+				bp_reply->num_ints,
+				(int*)xcb_drihybris_buffer_from_pixmap_ints(bp_reply),
+				bp_reply->num_fds, xcb_drihybris_buffer_from_pixmap_fds(bp_reply),
+				&buf);
+
+			TRACE("created remote EGL buffer, set target to EGL_NATIVE_BUFFER_ANDROID");
+
+			*buffer = (EGLClientBuffer) (ANativeWindowBuffer *) buf;
+			*target = EGL_NATIVE_BUFFER_ANDROID;
+			*ctx = EGL_NO_CONTEXT;
+			*attrib_list = NULL;
+		} else {
+			HYBRIS_ERROR("xcb_drihybris_buffer_from_pixmap call failed");
+			if (error)
+				HYBRIS_ERROR("xcb_drihybris_buffer_from_pixmap error code: %d\n",
+							error->error_code);
+		}
+	}
 	eglplatformcommon_passthroughImageKHR(ctx, target, buffer, attrib_list);
 }
 
@@ -161,7 +219,7 @@ extern "C" const char *x11ws_eglQueryString(EGLDisplay dpy, EGLint name, const c
 	{
 		static char eglextensionsbuf[1024];
 		snprintf(eglextensionsbuf, 1022, "%s %s", ret,
-			"EGL_EXT_swap_buffers_with_damage EGL_WL_create_x11_buffer_from_image"
+			"EGL_EXT_swap_buffers_with_damage EGL_KHR_image_pixmap"
 		);
 		ret = eglextensionsbuf;
 	}
@@ -194,29 +252,29 @@ extern "C" void x11ws_setSwapInterval(EGLDisplay dpy, EGLNativeWindowType win, E
 
 extern "C" EGLBoolean x11ws_eglGetConfigAttrib(struct _EGLDisplay *display, EGLConfig config, EGLint attribute, EGLint *value)
 {
-    TRACE("attribute:%i", attribute);
-    if (attribute == EGL_NATIVE_VISUAL_ID)
-    {
-        X11Display *xdpy = (X11Display *)display;
-        XVisualInfo visinfo_template;
-        XVisualInfo *visinfo = NULL;
-        int visinfos_count = 0;
+	TRACE("attribute:%i", attribute);
+	if (attribute == EGL_NATIVE_VISUAL_ID)
+	{
+		X11Display *xdpy = (X11Display *)display;
+		XVisualInfo visinfo_template;
+		XVisualInfo *visinfo = NULL;
+		int visinfos_count = 0;
 
-        visinfo_template.depth = 32;
-        visinfo = XGetVisualInfo (xdpy->xl_display,
-                            VisualDepthMask,
-                            &visinfo_template,
-                            &visinfos_count);
+		visinfo_template.depth = 32;
+		visinfo = XGetVisualInfo (xdpy->xl_display,
+							VisualDepthMask,
+							&visinfo_template,
+							&visinfos_count);
 
-        if (visinfos_count)
-        {
-            TRACE("visinfo.visualid:%i", attribute);
-            *value = visinfo->visualid;
-            return EGL_TRUE;
-        }
+		if (visinfos_count)
+		{
+			TRACE("visinfo.visualid:%i", attribute);
+			*value = visinfo->visualid;
+			return EGL_TRUE;
+		}
 
-    }
-    return EGL_FALSE;
+	}
+	return EGL_FALSE;
 }
 
 struct ws_module ws_module_info = {
@@ -231,5 +289,5 @@ struct ws_module ws_module_info = {
 	x11ws_prepareSwap,
 	x11ws_finishSwap,
 	x11ws_setSwapInterval,
-    x11ws_eglGetConfigAttrib
+	x11ws_eglGetConfigAttrib
 };
