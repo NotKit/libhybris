@@ -1,3 +1,4 @@
 [submodule "libhybris"]
 	path = libhybris
-	url = https://github.com/libhybris/libhybris
+        branch = ubports/xenial_-_android9_-_android10
+	url = https://gitlab.com/ubports/core/packaging/libhybris

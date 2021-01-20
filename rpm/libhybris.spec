@@ -377,6 +377,7 @@ install -m0644 AUTHORS %{buildroot}%{_docdir}/%{name}-%{version}
 %{_includedir}/hybris/properties
 %{_includedir}/hybris/dlfcn
 %{_includedir}/hybris/common
+%{_includedir}/hybris/gralloc
 %{_libdir}/libhybris-common.so
 %{_libdir}/pkgconfig/libgralloc.pc
 %{_libdir}/libandroid-properties.so
