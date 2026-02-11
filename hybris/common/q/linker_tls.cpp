@@ -27,6 +27,7 @@
  */
 
 #include "linker_tls.h"
+#include "linker_debug.h"
 
 #include <vector>
 
@@ -44,8 +45,11 @@
 
 __LIBC_HIDDEN__ _Atomic(size_t) __libc_tls_generation_copy = {SIZE_MAX};
 
-static bool g_static_tls_finished;
-static std::vector<TlsModule> g_tls_modules;
+static bool g_static_tls_finished = false;
+static std::vector<TlsModule> g_tls_modules = {};
+
+extern "C" ssize_t g_hybris_static_tls_tp_offset = 0;
+extern "C" size_t tls_tp_base = 0;
 
 static size_t get_unused_module_index() {
   for (size_t i = 0; i < g_tls_modules.size(); ++i) {
@@ -74,9 +78,8 @@ static void register_tls_module(soinfo* si, size_t static_offset) {
 
   const size_t new_generation = ++libc_modules.generation;
   __libc_tls_generation_copy = new_generation;
-  if (libc_modules.generation_libc_so != nullptr) {
-    *libc_modules.generation_libc_so = new_generation;
-  }
+  // hybris: generation_libc_so is never registered since bionic libc.so's
+  // constructor doesn't run; only the linker's own generation copy is used.
 
   g_tls_modules[module_idx].segment = si_tls->segment;
   g_tls_modules[module_idx].static_offset = static_offset;
@@ -90,7 +93,8 @@ static void unregister_tls_module(soinfo* si) {
 
   soinfo_tls* si_tls = si->get_tls();
   TlsModule& mod = g_tls_modules[__tls_module_id_to_idx(si_tls->module_id)];
-  CHECK(mod.static_offset == SIZE_MAX);
+  // hybris: all modules use static TLS (backed by hybris_tls_storage),
+  // so static_offset != SIZE_MAX is expected — skip original CHECK
   CHECK(mod.soinfo_ptr == si);
   mod = {};
   si_tls->module_id = kTlsUninitializedModuleId;
@@ -101,29 +105,6 @@ const TlsModule& get_tls_module(size_t module_id) {
   size_t module_idx = __tls_module_id_to_idx(module_id);
   CHECK(module_idx < g_tls_modules.size());
   return g_tls_modules[module_idx];
-}
-
-extern "C" void __linker_reserve_bionic_tls_in_static_tls() {
-  __libc_shared_globals()->static_tls_layout.reserve_bionic_tls();
-}
-
-void linker_setup_exe_static_tls(const char* progname) {
-  soinfo* somain = solist_get_somain();
-  StaticTlsLayout& layout = __libc_shared_globals()->static_tls_layout;
-  if (somain->get_tls() == nullptr) {
-    layout.reserve_exe_segment_and_tcb(nullptr, progname);
-  } else {
-    register_tls_module(somain, layout.reserve_exe_segment_and_tcb(&somain->get_tls()->segment, progname));
-  }
-
-  // The pthread key data is located at the very front of bionic_tls. As a
-  // temporary workaround, allocate bionic_tls just after the thread pointer so
-  // Golang can find its pthread key, as long as the executable's TLS segment is
-  // small enough. Specifically, Golang scans forward 384 words from the TP on
-  // ARM.
-  //  - http://b/118381796
-  //  - https://github.com/golang/go/issues/29674
-  __linker_reserve_bionic_tls_in_static_tls();
 }
 
 void linker_finalize_static_tls() {
@@ -139,11 +120,26 @@ void register_soinfo_tls(soinfo* si) {
     return;
   }
   size_t static_offset = SIZE_MAX;
+  StaticTlsLayout& layout = __libc_shared_globals()->static_tls_layout;
+
   if (!g_static_tls_finished) {
-    StaticTlsLayout& layout = __libc_shared_globals()->static_tls_layout;
-    static_offset = layout.reserve_solib_segment(si_tls->segment);
+    // Attempt static allocation from our pre-allocated glibc array
+    size_t offset = layout.reserve_solib_segment(si_tls->segment);
+    if (!layout.overflowed()) {
+      static_offset = offset;
+    } else {
+      // If it overflowed, we can't use static TLS for this module.
+      DEBUG("hybris: static TLS storage exhausted, falling back to dynamic for %s", si->get_realpath());
+      g_static_tls_finished = true;
+    }
   }
+
   register_tls_module(si, static_offset);
+
+  // Initialize the current thread's storage with the newly registered module's image
+  if (static_offset != SIZE_MAX) {
+    __init_static_tls_module(__tls_module_id_to_idx(si_tls->module_id));
+  }
 }
 
 void unregister_soinfo_tls(soinfo* si) {

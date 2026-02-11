@@ -78,36 +78,27 @@ __LIBC_HIDDEN__ bool __bionic_check_tls_alignment(size_t* alignment);
 
 struct StaticTlsLayout {
   constexpr StaticTlsLayout() {}
+  // Must match sizeof(hybris_tls_storage) in hybris/common/hooks.c.
+  static constexpr size_t MAX_SIZE = 512 * sizeof(void*);
 
 #if ANDROID_VERSION_MAJOR >= 16
 public:
-  size_t offset_bionic_tcb() const { return offset_bionic_tcb_; }
-  size_t offset_bionic_tls() const { return offset_bionic_tls_; }
   size_t offset_thread_pointer() const;
-  size_t offset_exe() const { return offset_exe_; }
 
   size_t size() const { return cursor_; }
+  bool overflowed() const { return overflowed_; }
 
-  size_t reserve_exe_segment_and_tcb(const TlsSegment* exe_segment, const char* progname);
-  size_t reserve_bionic_tls();
   size_t reserve_solib_segment(const TlsSegment& segment) { return reserve(segment.aligned_size); }
   void finish_layout();
 
 private:
   size_t cursor_ = 0;
   size_t align_ = 1;
-
-  size_t offset_bionic_tcb_ = SIZE_MAX;
-  size_t offset_bionic_tls_ = SIZE_MAX;
-  size_t offset_exe_ = SIZE_MAX;
+  bool overflowed_ = false;
 
   size_t reserve(size_t size, size_t alignment);
   size_t reserve(TlsAlignedSize aligned_size) {
     return reserve(aligned_size.size, aligned_size.align.value);
-  }
-
-  template <typename T> size_t reserve_type() {
-    return reserve(sizeof(T), alignof(T));
   }
 
   size_t round_up_with_overflow_check(size_t value, size_t alignment);
@@ -118,20 +109,14 @@ private:
   size_t alignment_ = 1;
   bool overflowed_ = false;
 
-  size_t offset_bionic_tcb_ = SIZE_MAX;
-  size_t offset_bionic_tls_ = SIZE_MAX;
-
+  // hybris: no bionic TCB/TLS offsets — TLS is backed by hybris_tls_storage
 public:
-  size_t offset_bionic_tcb() const { return offset_bionic_tcb_; }
-  size_t offset_bionic_tls() const { return offset_bionic_tls_; }
   size_t offset_thread_pointer() const;
 
   size_t size() const { return offset_; }
   size_t alignment() const { return alignment_; }
   bool overflowed() const { return overflowed_; }
 
-  size_t reserve_exe_segment_and_tcb(const TlsSegment* exe_segment, const char* progname);
-  void reserve_bionic_tls();
   size_t reserve_solib_segment(const TlsSegment& segment) {
     return reserve(segment.size, segment.alignment);
   }
@@ -229,6 +214,7 @@ struct TlsModules {
 };
 
 void __init_static_tls(void* static_tls);
+void __init_static_tls_module(size_t module_idx);
 
 // Dynamic Thread Vector. Each thread has a different DTV. For each module
 // (executable or solib), the DTV has a pointer to that module's TLS memory. The
@@ -262,10 +248,10 @@ struct TlsIndex {
 
 #if defined(__i386__)
 #define TLS_GET_ADDR_CCONV __attribute__((regparm(1)))
-#define TLS_GET_ADDR ___tls_get_addr
+#define TLS_GET_ADDR hybris_linker_tls_get_addr
 #else
 #define TLS_GET_ADDR_CCONV
-#define TLS_GET_ADDR __tls_get_addr
+#define TLS_GET_ADDR hybris_linker_tls_get_addr
 #endif
 
 extern "C" void* TLS_GET_ADDR(const TlsIndex* ti) TLS_GET_ADDR_CCONV;
