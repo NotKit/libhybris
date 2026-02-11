@@ -136,7 +136,7 @@ static inline void* get_hybris_tls_storage() {
   return reinterpret_cast<char*>(__get_tls()) + g_hybris_static_tls_tp_offset;
 }
 
-void __init_static_tls(void* static_tls) {
+void __init_static_tls(void* static_tls, size_t min_generation) {
   if (static_tls == nullptr) {
     static_tls = get_hybris_tls_storage();
   }
@@ -151,6 +151,12 @@ void __init_static_tls(void* static_tls) {
       // once we see the first dynamic module, we're done.
       break;
     }
+
+    // Only initialize modules loaded after our current generation.
+    if (module.first_generation <= min_generation) {
+      continue;
+    }
+
     if (module.segment.init_size == 0) {
       // Skip the memcpy call for TLS segments with no initializer, which is
       // common.
@@ -259,6 +265,24 @@ static void update_tls_dtv(bionic_tcb* tcb) {
   }
 
   dtv->generation = atomic_load(&modules.generation);
+}
+
+extern "C" void hybris_linker_tls_init_thread() {
+  bionic_tcb* tcb = __get_bionic_tcb();
+  TlsDtv* dtv = __get_tcb_dtv(tcb);
+
+  size_t old_generation = (tcb->tls_slot(TLS_SLOT_DTV) != nullptr)
+    ? dtv->generation : 0;
+
+  {
+    TlsModules& modules = __libc_shared_globals()->tls_modules;
+    ScopedSignalBlocker ssb;
+    ScopedWriteLock locker(&modules.rwlock);
+    update_tls_dtv(tcb);
+  }
+
+  // dtv->generation has been updated by update_tls_dtv
+  __init_static_tls(nullptr, old_generation);
 }
 
 __attribute__((noinline)) static void* tls_get_addr_slow_path(const TlsIndex* ti) {
