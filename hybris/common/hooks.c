@@ -2426,11 +2426,25 @@ __THROW int _hybris_hook___snprintf_chk (char *__restrict __s, size_t __n, int _
 }
 
 static __thread void *tls_hooks[16];
+static __thread void *hybris_tls_storage[512];
 
 static void *_hybris_hook___get_tls_hooks()
 {
     TRACE_HOOK("");
     return tls_hooks;
+}
+
+ssize_t hybris_get_tls_storage_tp_offset()
+{
+    void *tp;
+#if defined(__aarch64__)
+    __asm__ ("mrs %0, tpidr_el0" : "=r" (tp));
+#elif defined(__arm__)
+    __asm__ ("mrc p15, 0, %0, c13, c0, 3" : "=r" (tp));
+#else
+    tp = __builtin_thread_pointer();
+#endif
+    return (ssize_t)((char *)hybris_tls_storage - (char *)tp);
 }
 
 struct __wrapped_atexit {
@@ -3697,6 +3711,10 @@ static void __hybris_linker_init()
     _android_get_exported_namespace = dlsym(linker_handle, "android_get_exported_namespace");
 #if WANT_LINKER_Q
     _android_shared_globals = dlsym(linker_handle, "android_shared_globals");
+    void (*_android_set_hybris_tls_data)(ssize_t, size_t) = dlsym(linker_handle, "android_set_hybris_tls_data");
+    if (_android_set_hybris_tls_data) {
+        _android_set_hybris_tls_data(hybris_get_tls_storage_tp_offset(), sizeof(hybris_tls_storage));
+    }
 #endif
     /* Now its time to setup the linker itself */
 #ifdef WANT_ARM_TRACING

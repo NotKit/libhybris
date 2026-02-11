@@ -51,27 +51,20 @@ __LIBC_HIDDEN__ bool __bionic_check_tls_alignment(size_t* alignment);
 
 struct StaticTlsLayout {
   constexpr StaticTlsLayout() {}
+  static constexpr size_t MAX_SIZE = 512 * 8;
 
 private:
   size_t offset_ = 0;
   size_t alignment_ = 1;
   bool overflowed_ = false;
 
-  // Offsets to various Bionic TLS structs from the beginning of static TLS.
-  size_t offset_bionic_tcb_ = SIZE_MAX;
-  size_t offset_bionic_tls_ = SIZE_MAX;
-
 public:
-  size_t offset_bionic_tcb() const { return offset_bionic_tcb_; }
-  size_t offset_bionic_tls() const { return offset_bionic_tls_; }
   size_t offset_thread_pointer() const;
 
   size_t size() const { return offset_; }
   size_t alignment() const { return alignment_; }
   bool overflowed() const { return overflowed_; }
 
-  size_t reserve_exe_segment_and_tcb(const TlsSegment* exe_segment, const char* progname);
-  void reserve_bionic_tls();
   size_t reserve_solib_segment(const TlsSegment& segment) {
     return reserve(segment.size, segment.alignment);
   }
@@ -168,6 +161,7 @@ struct TlsModules {
 };
 
 void __init_static_tls(void* static_tls);
+void __init_static_tls_module(size_t module_idx);
 
 // Dynamic Thread Vector. Each thread has a different DTV. For each module
 // (executable or solib), the DTV has a pointer to that module's TLS memory. The
@@ -201,10 +195,10 @@ struct TlsIndex {
 
 #if defined(__i386__)
 #define TLS_GET_ADDR_CCONV __attribute__((regparm(1)))
-#define TLS_GET_ADDR ___tls_get_addr
+#define TLS_GET_ADDR hybris_linker_tls_get_addr
 #else
 #define TLS_GET_ADDR_CCONV
-#define TLS_GET_ADDR __tls_get_addr
+#define TLS_GET_ADDR hybris_linker_tls_get_addr
 #endif
 
 extern "C" void* TLS_GET_ADDR(const TlsIndex* ti) TLS_GET_ADDR_CCONV;

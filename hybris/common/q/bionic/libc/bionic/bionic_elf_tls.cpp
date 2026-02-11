@@ -30,6 +30,7 @@
 
 #include <async_safe/CHECK.h>
 #include <async_safe/log.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/param.h>
 #include <unistd.h>
@@ -89,81 +90,16 @@ bool __bionic_check_tls_alignment(size_t* alignment) {
 }
 
 size_t StaticTlsLayout::offset_thread_pointer() const {
-  return offset_bionic_tcb_ + (-MIN_TLS_SLOT * sizeof(void*));
-}
-
-// Reserves space for the Bionic TCB and the executable's TLS segment. Returns
-// the offset of the executable's TLS segment.
-size_t StaticTlsLayout::reserve_exe_segment_and_tcb(const TlsSegment* exe_segment,
-                                                    const char* progname __attribute__((unused))) {
-  // Special case: if the executable has no TLS segment, then just allocate a
-  // TCB and skip the minimum alignment check on ARM.
-  if (exe_segment == nullptr) {
-    offset_bionic_tcb_ = reserve_type<bionic_tcb>();
-    return 0;
-  }
-
-#if defined(__arm__) || defined(__aarch64__)
-
-  // First reserve enough space for the TCB before the executable segment.
-  reserve(sizeof(bionic_tcb), 1);
-
-  // Then reserve the segment itself.
-  const size_t result = reserve(exe_segment->size, exe_segment->alignment);
-
-  // The variant 1 ABI that ARM linkers follow specifies a 2-word TCB between
-  // the thread pointer and the start of the executable's TLS segment, but both
-  // the thread pointer and the TLS segment are aligned appropriately for the
-  // TLS segment. Calculate the distance between the thread pointer and the
-  // EXE's segment.
-  const size_t exe_tpoff = __BIONIC_ALIGN(sizeof(void*) * 2, exe_segment->alignment);
-
-  const size_t min_bionic_alignment = BIONIC_ROUND_UP_POWER_OF_2(MAX_TLS_SLOT) * sizeof(void*);
-  if (exe_tpoff < min_bionic_alignment) {
-    async_safe_fatal("error: \"%s\": executable's TLS segment is underaligned: "
-                     "alignment is %zu, needs to be at least %zu for %s Bionic",
-                     progname, exe_segment->alignment, min_bionic_alignment,
-                     (sizeof(void*) == 4 ? "ARM" : "ARM64"));
-  }
-
-  offset_bionic_tcb_ = result - exe_tpoff - (-MIN_TLS_SLOT * sizeof(void*));
-  return result;
-
-#elif defined(__i386__) || defined(__x86_64__)
-
-  // x86 uses variant 2 TLS layout. The executable's segment is located just
-  // before the TCB.
-  static_assert(MIN_TLS_SLOT == 0, "First slot of bionic_tcb must be slot #0 on x86");
-  const size_t exe_size = round_up_with_overflow_check(exe_segment->size, exe_segment->alignment);
-  reserve(exe_size, 1);
-  const size_t max_align = MAX(alignof(bionic_tcb), exe_segment->alignment);
-  offset_bionic_tcb_ = reserve(sizeof(bionic_tcb), max_align);
-  return offset_bionic_tcb_ - exe_size;
-
-#elif defined(__riscv)
-
-  // First reserve enough space for the TCB before the executable segment.
-  offset_bionic_tcb_ = reserve(sizeof(bionic_tcb), 1);
-
-  // Then reserve the segment itself.
-  const size_t exe_size = round_up_with_overflow_check(exe_segment->size, exe_segment->alignment);
-  return reserve(exe_size, 1);
-
-#else
-#error "Unrecognized architecture"
-#endif
-}
-
-void StaticTlsLayout::reserve_bionic_tls() {
-  offset_bionic_tls_ = reserve_type<bionic_tls>();
+  return 0;
 }
 
 void StaticTlsLayout::finish_layout() {
   // Round the offset up to the alignment.
   offset_ = round_up_with_overflow_check(offset_, alignment_);
 
-  if (overflowed_) {
-    async_safe_fatal("error: TLS segments in static TLS overflowed");
+  if (overflowed_ || offset_ > MAX_SIZE) {
+    async_safe_fatal("error: TLS segments in static TLS overflowed (size %zu, max %zu)",
+                     offset_, MAX_SIZE);
   }
 }
 
@@ -174,6 +110,12 @@ size_t StaticTlsLayout::reserve(size_t size, size_t alignment) {
   const size_t result = offset_;
   if (__builtin_add_overflow(offset_, size, &offset_)) overflowed_ = true;
   alignment_ = MAX(alignment_, alignment);
+
+  if (offset_ > MAX_SIZE) overflowed_ = true;
+
+  fprintf(stderr, "hybris: StaticTlsLayout::reserve size=%zu align=%zu => offset=%zu (rem=%zu)\n",
+          size, alignment, result, (offset_ <= MAX_SIZE) ? (MAX_SIZE - offset_) : 0);
+
   return result;
 }
 
@@ -188,11 +130,16 @@ size_t StaticTlsLayout::round_up_with_overflow_check(size_t value, size_t alignm
 // static TLS memory. To reduce dirty pages, this function only writes to pages
 // within the static TLS that need initialization. The memory should already be
 // zero-initialized on entry.
+extern "C" ssize_t g_hybris_static_tls_tp_offset;
+
+static inline void* get_hybris_tls_storage() {
+  return reinterpret_cast<char*>(__get_tls()) + g_hybris_static_tls_tp_offset;
+}
+
 void __init_static_tls(void* static_tls) {
-  // The part of the table we care about (i.e. static TLS modules) never changes
-  // after startup, but we still need the mutex because the table could grow,
-  // moving the initial part. If this locking is too slow, we can duplicate the
-  // static part of the table.
+  if (static_tls == nullptr) {
+    static_tls = get_hybris_tls_storage();
+  }
   TlsModules& modules = __libc_shared_globals()->tls_modules;
   ScopedSignalBlocker ssb;
   ScopedReadLock locker(&modules.rwlock);
@@ -209,6 +156,20 @@ void __init_static_tls(void* static_tls) {
       // common.
       continue;
     }
+    memcpy(static_cast<char*>(static_tls) + module.static_offset,
+           module.segment.init_ptr,
+           module.segment.init_size);
+  }
+}
+
+void __init_static_tls_module(size_t module_idx) {
+  void* static_tls = get_hybris_tls_storage();
+  TlsModules& modules = __libc_shared_globals()->tls_modules;
+  ScopedSignalBlocker ssb;
+  ScopedReadLock locker(&modules.rwlock);
+
+  TlsModule& module = modules.module_table[module_idx];
+  if (module.static_offset != SIZE_MAX && module.segment.init_size > 0) {
     memcpy(static_cast<char*>(static_tls) + module.static_offset,
            module.segment.init_ptr,
            module.segment.init_size);
@@ -240,14 +201,17 @@ static void update_tls_dtv(bionic_tcb* tcb) {
   const TlsModules& modules = __libc_shared_globals()->tls_modules;
   BionicAllocator& allocator = __libc_shared_globals()->tls_allocator;
 
+  // If DTV hasn't been ever initialized, TLS_SLOT_DTV should be NULL
+  const bool has_dvt = tcb->tls_slot(TLS_SLOT_DTV) != nullptr;
+
   // Use the generation counter from the shared globals instead of the local
   // copy, which won't be initialized yet if __tls_get_addr is called before
   // libc.so's constructor.
-  if (__get_tcb_dtv(tcb)->generation == atomic_load(&modules.generation)) {
+  if (has_dvt && __get_tcb_dtv(tcb)->generation == atomic_load(&modules.generation)) {
     return;
   }
 
-  const size_t old_cnt = __get_tcb_dtv(tcb)->count;
+  const size_t old_cnt = has_dvt ? __get_tcb_dtv(tcb)->count : 0;
 
   // If the DTV isn't large enough, allocate a larger one. Because a signal
   // handler could interrupt the fast path of __tls_get_addr, we don't free the
@@ -256,9 +220,12 @@ static void update_tls_dtv(bionic_tcb* tcb) {
   // doubles.
   if (modules.module_count > old_cnt) {
     size_t new_cnt = calculate_new_dtv_count();
-    TlsDtv* const old_dtv = __get_tcb_dtv(tcb);
+    TlsDtv* const old_dtv = has_dvt ? __get_tcb_dtv(tcb) : NULL;
     TlsDtv* const new_dtv = static_cast<TlsDtv*>(allocator.alloc(dtv_size_in_bytes(new_cnt)));
-    memcpy(new_dtv, old_dtv, dtv_size_in_bytes(old_cnt));
+    // TlsDtv* const new_dtv = static_cast<TlsDtv*>(malloc(dtv_size_in_bytes(new_cnt)));
+    if (has_dvt) {
+      memcpy(new_dtv, old_dtv, dtv_size_in_bytes(old_cnt));
+    }
     new_dtv->count = new_cnt;
     new_dtv->next = old_dtv;
     __set_tcb_dtv(tcb, new_dtv);
@@ -266,8 +233,7 @@ static void update_tls_dtv(bionic_tcb* tcb) {
 
   TlsDtv* const dtv = __get_tcb_dtv(tcb);
 
-  const StaticTlsLayout& layout = __libc_shared_globals()->static_tls_layout;
-  char* static_tls = reinterpret_cast<char*>(tcb) - layout.offset_bionic_tcb();
+  char* static_tls = reinterpret_cast<char*>(get_hybris_tls_storage());
 
   // Initialize static TLS modules and free unloaded modules.
   for (size_t i = 0; i < dtv->count; ++i) {
@@ -311,12 +277,11 @@ __attribute__((noinline)) static void* tls_get_addr_slow_path(const TlsIndex* ti
   void* mod_ptr = dtv->modules[module_idx];
   if (mod_ptr == nullptr) {
     const TlsSegment& segment = modules.module_table[module_idx].segment;
-    mod_ptr = __libc_shared_globals()->tls_allocator.memalign(segment.alignment, segment.size);
-    void* mod_ptr = nullptr;
-if (posix_memalign(&mod_ptr, segment.alignment, segment.size) != 0) {
-    // Handle allocation failure
-    mod_ptr = nullptr;
-}
+    // FIXME: need a way to allocate within 2 GB of __get_tls() pointer
+    if (posix_memalign(&mod_ptr, segment.alignment, segment.size) != 0) {
+        // Handle allocation failure
+        mod_ptr = nullptr;
+    }
     if (segment.init_size > 0) {
       memcpy(mod_ptr, segment.init_ptr, segment.init_size);
     }
@@ -342,7 +307,12 @@ if (posix_memalign(&mod_ptr, segment.alignment, segment.size) != 0) {
 // TLS_GET_ADDR_CCONV is unset. 32-bit x86 uses ___tls_get_addr instead and a
 // regparm() calling convention.
 extern "C" void* TLS_GET_ADDR(const TlsIndex* ti) TLS_GET_ADDR_CCONV {
-  TlsDtv* dtv = __get_tcb_dtv(__get_bionic_tcb());
+  // hybris: TLS_SLOT_DTV of thread local storage might be uninitialized
+  bionic_tcb* tcb = __get_bionic_tcb();
+  if (tcb->tls_slot(TLS_SLOT_DTV) == nullptr)
+    return tls_get_addr_slow_path(ti);
+
+  TlsDtv* dtv = __get_tcb_dtv(tcb);
 
   // TODO: See if we can use a relaxed memory ordering here instead.
   size_t generation = atomic_load(&__libc_tls_generation_copy);

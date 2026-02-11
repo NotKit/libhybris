@@ -2906,10 +2906,11 @@ static bool is_tls_reloc(ElfW(Word) type) {
   }
 }
 
+extern size_t tls_tp_base;
+
 template<typename ElfRelIteratorT>
 bool soinfo::relocate(const VersionTracker& version_tracker, ElfRelIteratorT&& rel_iterator,
                       const soinfo_list_t& global_group, const soinfo_list_t& local_group) {
-  const size_t tls_tp_base = 0/*__libc_shared_globals()->static_tls_layout.offset_thread_pointer()*/;
   std::vector<std::pair<TlsDescriptor*, size_t>> deferred_tlsdesc_relocs;
 
   for (size_t idx = 0; rel_iterator.has_next(); ++idx) {
