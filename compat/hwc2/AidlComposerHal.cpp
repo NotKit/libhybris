@@ -269,8 +269,10 @@ AidlComposer::AidlComposer(const std::string& serviceName) {
     }
 
     // Start the binder thread pool if not already started for AIDL composer
-    ABinderProcess_setThreadPoolMaxThreadCount(1);
-    ABinderProcess_startThreadPool();
+    if (!ABinderProcess_isThreadPoolStarted()) {
+        ABinderProcess_setThreadPoolMaxThreadCount(1);
+        ABinderProcess_startThreadPool();
+    }
 
 #if ANDROID_VERSION_MAJOR >= 14
     addReader(translate<Display>(kSingleReaderKey));

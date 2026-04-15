@@ -54,14 +54,12 @@ static inline _SurfaceTextureClientHybris *get_internal_stch(SurfaceTextureClien
     }
 
     _SurfaceTextureClientHybris *s = static_cast<_SurfaceTextureClientHybris*>(stc);
-    assert(s->refcount >= 1);
 
     return s;
 }
 
 #if ANDROID_VERSION_MAJOR==4 && ANDROID_VERSION_MINOR<=2
 _SurfaceTextureClientHybris::_SurfaceTextureClientHybris()
-    : refcount(1),
       ready(false)
 {
     REPORT_FUNCTION()
@@ -71,7 +69,6 @@ _SurfaceTextureClientHybris::_SurfaceTextureClientHybris()
 #if ANDROID_VERSION_MAJOR>=5
 _SurfaceTextureClientHybris::_SurfaceTextureClientHybris(const sp<IGraphicBufferProducer> &st)
     : Surface::Surface(st, true),
-      refcount(1),
       ready(false)
 {
     REPORT_FUNCTION()
@@ -79,7 +76,6 @@ _SurfaceTextureClientHybris::_SurfaceTextureClientHybris(const sp<IGraphicBuffer
 #elif ANDROID_VERSION_MAJOR==4 && ANDROID_VERSION_MINOR>=4
 _SurfaceTextureClientHybris::_SurfaceTextureClientHybris(const sp<BufferQueue> &bq)
     : Surface::Surface(bq, true),
-      refcount(1),
       ready(false)
 {
     REPORT_FUNCTION()
@@ -87,7 +83,6 @@ _SurfaceTextureClientHybris::_SurfaceTextureClientHybris(const sp<BufferQueue> &
 
 _SurfaceTextureClientHybris::_SurfaceTextureClientHybris(const sp<IGraphicBufferProducer> &st)
     : Surface::Surface(st, true),
-      refcount(1),
       ready(false)
 {
     REPORT_FUNCTION()
@@ -101,7 +96,6 @@ _SurfaceTextureClientHybris::_SurfaceTextureClientHybris(const _SurfaceTextureCl
 #else
     : Surface::Surface(new BufferQueue(), true),
 #endif
-      refcount(stch.refcount),
       ready(false)
 {
     REPORT_FUNCTION()
@@ -114,7 +108,6 @@ _SurfaceTextureClientHybris::_SurfaceTextureClientHybris(const sp<ISurfaceTextur
 _SurfaceTextureClientHybris::_SurfaceTextureClientHybris(const sp<IGraphicBufferProducer> &st)
     : Surface::Surface(st, false),
 #endif
-      refcount(1),
       ready(false)
 {
     REPORT_FUNCTION()
@@ -124,7 +117,6 @@ _SurfaceTextureClientHybris::_SurfaceTextureClientHybris(const sp<IGraphicBuffer
 _SurfaceTextureClientHybris::_SurfaceTextureClientHybris(const android::sp<android::IGraphicBufferProducer> &st,
         bool producerIsControlledByApp)
     : Surface::Surface(st, producerIsControlledByApp),
-      refcount(1),
       ready(false)
 {
     REPORT_FUNCTION()
@@ -147,6 +139,33 @@ void _SurfaceTextureClientHybris::setReady(bool ready)
     this->ready = ready;
 }
 
+#if ANDROID_VERSION_MAJOR >= 16
+int _SurfaceTextureClientHybris::dequeueBuffer(sp<GraphicBuffer>* buffer, int* fenceFd)
+{
+    return Surface::dequeueBuffer(buffer, fenceFd);
+}
+
+int _SurfaceTextureClientHybris::queueBuffer(sp<GraphicBuffer>&& buffer, int fenceFd)
+{
+    return Surface::queueBuffer(std::move(buffer), fenceFd);
+}
+
+int _SurfaceTextureClientHybris::dequeueBufferCompat(ANativeWindowBuffer** buffer, int* fenceFd)
+{
+    sp<GraphicBuffer> graphicBuffer;
+    int ret = Surface::dequeueBuffer(&graphicBuffer, fenceFd);
+    if (ret == OK && graphicBuffer != nullptr) {
+        *buffer = graphicBuffer.get();
+    }
+    return ret;
+}
+
+int _SurfaceTextureClientHybris::queueBufferCompat(ANativeWindowBuffer* buffer, int fenceFd)
+{
+    sp<GraphicBuffer> gb = static_cast<GraphicBuffer*>(buffer);
+    return Surface::queueBuffer(std::move(gb), fenceFd);
+}
+#else
 int _SurfaceTextureClientHybris::dequeueBuffer(ANativeWindowBuffer** buffer, int* fenceFd)
 {
 #if ANDROID_VERSION_MAJOR==4 && ANDROID_VERSION_MINOR<=2
@@ -164,6 +183,7 @@ int _SurfaceTextureClientHybris::queueBuffer(ANativeWindowBuffer* buffer, int fe
     return Surface::queueBuffer(buffer, fenceFd);
 #endif
 }
+#endif
 
 #if ANDROID_VERSION_MAJOR==4 && ANDROID_VERSION_MINOR<=2
 void _SurfaceTextureClientHybris::setISurfaceTexture(const sp<ISurfaceTexture>& surface_texture)
@@ -238,11 +258,16 @@ SurfaceTextureClientHybris surface_texture_client_create_by_id(unsigned int text
 
     ALOGD("stch: %p (%s)", stch, __PRETTY_FUNCTION__);
 
+    // Give stch initial refcount, since RefBase won't give it in `new`.
+    stch->incStrong((void *) surface_texture_client_ref);
+
     if (stch->surface_texture != NULL)
       stch->surface_texture.clear();
 
     const bool allow_synchronous_mode = true;
-#if ANDROID_VERSION_MAJOR>=5
+#if ANDROID_VERSION_MAJOR >= 16
+    stch->surface_texture = GLConsumer::create(consumer, texture_id, GL_TEXTURE_EXTERNAL_OES, true, true);
+#elif ANDROID_VERSION_MAJOR>=5
     stch->surface_texture = new GLConsumer(consumer, texture_id, GL_TEXTURE_EXTERNAL_OES, true, true);
 #elif ANDROID_VERSION_MAJOR==4 && ANDROID_VERSION_MINOR<=2
     stch->surface_texture = new SurfaceTexture(texture_id, allow_synchronous_mode, GL_TEXTURE_EXTERNAL_OES, true, buffer_queue);
@@ -267,6 +292,8 @@ SurfaceTextureClientHybris surface_texture_client_create_by_igbp(IGBPWrapperHybr
     // The producer should be the same BufferQueue as what the client is using but over Binder
     // Allow the app to control the producer side BufferQueue
     _SurfaceTextureClientHybris *stch(new _SurfaceTextureClientHybris(igbp->producer, true));
+    // Give stch initial refcount, since RefBase won't give it in `new`.
+    stch->incStrong((void *) surface_texture_client_ref);
     // Ready for rendering
     stch->setReady();
     return stch;
@@ -290,7 +317,7 @@ GLConsumerWrapperHybris gl_consumer_create_by_id_with_igbc(unsigned int texture_
 
     IGBCWrapper *igbc = static_cast<IGBCWrapper*>(wrapper);
     // Use a fence guard and consumer is controlled by app:
-    sp<_GLConsumerHybris> gl_consumer = new _GLConsumerHybris(igbc->consumer, texture_id, GL_TEXTURE_EXTERNAL_OES, true, true);
+    sp<_GLConsumerHybris> gl_consumer = new _GLConsumerHybris(igbc->consumer, texture_id, GLConsumer::TEXTURE_EXTERNAL, true, true);
     GLConsumerWrapper *glc_wrapper = new GLConsumerWrapper(gl_consumer);
 
     return glc_wrapper;
@@ -403,18 +430,9 @@ void surface_texture_client_update_texture(SurfaceTextureClientHybris stc)
 
 void surface_texture_client_destroy(SurfaceTextureClientHybris stc)
 {
-    REPORT_FUNCTION()
+    ALOGE("surface_texture_client_destroy() is obsoleted. Use _ref() and _unref().");
 
-    _SurfaceTextureClientHybris *s = get_internal_stch(stc, __PRETTY_FUNCTION__);
-    if (s == NULL)
-    {
-        ALOGE("s == NULL, cannot destroy SurfaceTextureClientHybris instance");
-        return;
-    }
-
-    s->refcount = 0;
-
-    delete s;
+    surface_texture_client_unref(stc);
 }
 
 void surface_texture_client_ref(SurfaceTextureClientHybris stc)
@@ -425,7 +443,8 @@ void surface_texture_client_ref(SurfaceTextureClientHybris stc)
     if (s == NULL)
         return;
 
-    s->refcount++;
+    // incStrong/decStrong token must be the same, doesn't matter what it is
+    s->incStrong((void *) surface_texture_client_ref);
 }
 
 void surface_texture_client_unref(SurfaceTextureClientHybris stc)
@@ -439,10 +458,8 @@ void surface_texture_client_unref(SurfaceTextureClientHybris stc)
         return;
     }
 
-    if (s->refcount > 1)
-        s->refcount--;
-    else
-        surface_texture_client_destroy (stc);
+    // incStrong/decStrong token must be the same, doesn't matter what it is
+    s->decStrong((void *) surface_texture_client_ref);
 }
 
 void surface_texture_client_set_surface_texture(SurfaceTextureClientHybris stc, EGLNativeWindowType native_window)

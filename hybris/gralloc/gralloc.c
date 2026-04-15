@@ -91,9 +91,11 @@ static void gralloc1_init(void);
 #if HAS_GRALLOC1_HEADER
 #define GRALLOC0(code) (version == 0) { code }
 #define GRALLOC1(code) (version == 1) { code }
+#define GRALLOC_COMPAT(code) (version == 2) { code }
 #else
 #define GRALLOC0(code) (version == 0) { code }
 #define GRALLOC1(code) (0) {}
+#define GRALLOC_COMPAT(code) (0) {}
 #endif
 
 #if ANDROID_VERSION_MAJOR>=10
@@ -108,6 +110,12 @@ void hybris_gralloc_deinitialize(void);
 
 void hybris_gralloc_initialize(int framebuffer)
 {
+#if ANDROID_VERSION_MAJOR>=10
+    hybris_ui_initialize();
+    if (hybris_ui_check_for_symbol("graphic_buffer_allocator_allocate")) {
+        version = 2;
+    } else
+#endif
     if (version == -1) {
 #if ANDROID_VERSION_MAJOR>=10
         hybris_ui_initialize();

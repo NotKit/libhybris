@@ -3492,6 +3492,15 @@ bool soinfo::prelink_image() {
 
   TlsSegment tls_segment;
   if (__bionic_get_tls_segment(phdr, phnum, load_bias, &tls_segment)) {
+#if ANDROID_VERSION_MAJOR >= 16
+    if (!__bionic_check_tls_align(tls_segment.aligned_size.align.value)) {
+      if (!relocating_linker) {
+        DL_ERR("TLS segment alignment in \"%s\" is not a power of 2: %zu",
+               get_realpath(), tls_segment.aligned_size.align.value);
+      }
+      return false;
+    }
+#else
     if (!__bionic_check_tls_alignment(&tls_segment.alignment)) {
       if (!relocating_linker) {
         DL_ERR("TLS segment alignment in \"%s\" is not a power of 2: %zu",
@@ -3499,6 +3508,7 @@ bool soinfo::prelink_image() {
       }
       return false;
     }
+#endif
     tls_ = std::unique_ptr<soinfo_tls>(new soinfo_tls());
     tls_->segment = tls_segment;
   }

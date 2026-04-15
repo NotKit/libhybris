@@ -14,7 +14,7 @@ AM_CPPFLAGS = \
 	-Wstrict-overflow=5
 
 AM_CXXFLAGS = \
-	-std=gnu++11 \
+	-std=gnu++17 \
 	-Wold-style-cast
 
 q_la_SOURCES = \

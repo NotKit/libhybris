@@ -33,9 +33,30 @@
 #include <stdatomic.h>
 #include <stdint.h>
 #include <sys/cdefs-android.h>
+#include <android-version.h>
 
 #define __LIBC_HIDDEN__ __attribute__((visibility("hidden")))
 __LIBC_HIDDEN__ extern _Atomic(size_t) __libc_tls_generation_copy;
+
+#if ANDROID_VERSION_MAJOR >= 16
+
+struct TlsAlign {
+  size_t value = 1;
+  size_t skew = 0;  // p_vaddr % p_align
+};
+
+struct TlsAlignedSize {
+  size_t size = 0;
+  TlsAlign align;
+};
+
+struct TlsSegment {
+  TlsAlignedSize aligned_size;
+  const void* init_ptr = "";    // Field is non-null even when init_size is 0.
+  size_t init_size = 0;
+};
+
+#else /* ANDROID_VERSION_MAJOR < 16 */
 
 struct TlsSegment {
   size_t size = 0;
@@ -44,20 +65,59 @@ struct TlsSegment {
   size_t init_size = 0;
 };
 
+#endif /* ANDROID_VERSION_MAJOR >= 16 */
+
 __LIBC_HIDDEN__ bool __bionic_get_tls_segment(const ElfW(Phdr)* phdr_table, size_t phdr_count,
                                               ElfW(Addr) load_bias, TlsSegment* out);
 
+#if ANDROID_VERSION_MAJOR >= 16
+__LIBC_HIDDEN__ bool __bionic_check_tls_align(size_t align);
+#else
 __LIBC_HIDDEN__ bool __bionic_check_tls_alignment(size_t* alignment);
+#endif
 
 struct StaticTlsLayout {
   constexpr StaticTlsLayout() {}
 
+#if ANDROID_VERSION_MAJOR >= 16
+public:
+  size_t offset_bionic_tcb() const { return offset_bionic_tcb_; }
+  size_t offset_bionic_tls() const { return offset_bionic_tls_; }
+  size_t offset_thread_pointer() const;
+  size_t offset_exe() const { return offset_exe_; }
+
+  size_t size() const { return cursor_; }
+
+  size_t reserve_exe_segment_and_tcb(const TlsSegment* exe_segment, const char* progname);
+  size_t reserve_bionic_tls();
+  size_t reserve_solib_segment(const TlsSegment& segment) { return reserve(segment.aligned_size); }
+  void finish_layout();
+
+private:
+  size_t cursor_ = 0;
+  size_t align_ = 1;
+
+  size_t offset_bionic_tcb_ = SIZE_MAX;
+  size_t offset_bionic_tls_ = SIZE_MAX;
+  size_t offset_exe_ = SIZE_MAX;
+
+  size_t reserve(size_t size, size_t alignment);
+  size_t reserve(TlsAlignedSize aligned_size) {
+    return reserve(aligned_size.size, aligned_size.align.value);
+  }
+
+  template <typename T> size_t reserve_type() {
+    return reserve(sizeof(T), alignof(T));
+  }
+
+  size_t round_up_with_overflow_check(size_t value, size_t alignment);
+
+#else /* ANDROID_VERSION_MAJOR < 16 */
 private:
   size_t offset_ = 0;
   size_t alignment_ = 1;
   bool overflowed_ = false;
 
-  // Offsets to various Bionic TLS structs from the beginning of static TLS.
   size_t offset_bionic_tcb_ = SIZE_MAX;
   size_t offset_bionic_tls_ = SIZE_MAX;
 
@@ -85,6 +145,7 @@ private:
   }
 
   size_t round_up_with_overflow_check(size_t value, size_t alignment);
+#endif /* ANDROID_VERSION_MAJOR >= 16 */
 };
 
 static constexpr size_t kTlsGenerationNone = 0;

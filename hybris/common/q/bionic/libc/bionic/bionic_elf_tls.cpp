@@ -64,16 +64,35 @@ bool __bionic_get_tls_segment(const ElfW(Phdr)* phdr_table, size_t phdr_count,
   for (size_t i = 0; i < phdr_count; ++i) {
     const ElfW(Phdr)& phdr = phdr_table[i];
     if (phdr.p_type == PT_TLS) {
+#if ANDROID_VERSION_MAJOR >= 16
+      *out = TlsSegment{
+        .aligned_size = TlsAlignedSize{
+          .size = phdr.p_memsz,
+          .align = TlsAlign{
+            .value = phdr.p_align ? phdr.p_align : 1,
+            .skew = phdr.p_vaddr % (phdr.p_align ? phdr.p_align : 1),
+          },
+        },
+        .init_ptr = reinterpret_cast<void*>(load_bias + phdr.p_vaddr),
+        .init_size = phdr.p_filesz,
+      };
+#else
         out->size = phdr.p_memsz;
         out->alignment = phdr.p_align;
         out->init_ptr = reinterpret_cast<void*>(load_bias + phdr.p_vaddr);
         out->init_size = phdr.p_filesz;
+#endif
       return true;
     }
   }
   return false;
 }
 
+#if ANDROID_VERSION_MAJOR >= 16
+bool __bionic_check_tls_align(size_t align) {
+  return powerof2(align);
+}
+#else
 // Return true if the alignment of a TLS segment is a valid power-of-two. Also
 // cap the alignment if it's too high.
 bool __bionic_check_tls_alignment(size_t* alignment) {
@@ -87,6 +106,7 @@ bool __bionic_check_tls_alignment(size_t* alignment) {
   *alignment = MIN(*alignment, PAGE_SIZE);
   return true;
 }
+#endif
 
 size_t StaticTlsLayout::offset_thread_pointer() const {
   return offset_bionic_tcb_ + (-MIN_TLS_SLOT * sizeof(void*));
@@ -109,20 +129,32 @@ size_t StaticTlsLayout::reserve_exe_segment_and_tcb(const TlsSegment* exe_segmen
   reserve(sizeof(bionic_tcb), 1);
 
   // Then reserve the segment itself.
+#if ANDROID_VERSION_MAJOR >= 16
+  const size_t result = reserve(exe_segment->aligned_size.size, exe_segment->aligned_size.align.value);
+#else
   const size_t result = reserve(exe_segment->size, exe_segment->alignment);
+#endif
 
   // The variant 1 ABI that ARM linkers follow specifies a 2-word TCB between
   // the thread pointer and the start of the executable's TLS segment, but both
   // the thread pointer and the TLS segment are aligned appropriately for the
   // TLS segment. Calculate the distance between the thread pointer and the
   // EXE's segment.
+#if ANDROID_VERSION_MAJOR >= 16
+  const size_t exe_tpoff = __BIONIC_ALIGN(sizeof(void*) * 2, exe_segment->aligned_size.align.value);
+#else
   const size_t exe_tpoff = __BIONIC_ALIGN(sizeof(void*) * 2, exe_segment->alignment);
+#endif
 
   const size_t min_bionic_alignment = BIONIC_ROUND_UP_POWER_OF_2(MAX_TLS_SLOT) * sizeof(void*);
   if (exe_tpoff < min_bionic_alignment) {
     async_safe_fatal("error: \"%s\": executable's TLS segment is underaligned: "
                      "alignment is %zu, needs to be at least %zu for %s Bionic",
+#if ANDROID_VERSION_MAJOR >= 16
+                     progname, exe_segment->aligned_size.align.value, min_bionic_alignment,
+#else
                      progname, exe_segment->alignment, min_bionic_alignment,
+#endif
                      (sizeof(void*) == 4 ? "ARM" : "ARM64"));
   }
 
@@ -134,9 +166,15 @@ size_t StaticTlsLayout::reserve_exe_segment_and_tcb(const TlsSegment* exe_segmen
   // x86 uses variant 2 TLS layout. The executable's segment is located just
   // before the TCB.
   static_assert(MIN_TLS_SLOT == 0, "First slot of bionic_tcb must be slot #0 on x86");
+#if ANDROID_VERSION_MAJOR >= 16
+  const size_t exe_size = round_up_with_overflow_check(exe_segment->aligned_size.size, exe_segment->aligned_size.align.value);
+  reserve(exe_size, 1);
+  const size_t max_align = MAX(alignof(bionic_tcb), exe_segment->aligned_size.align.value);
+#else
   const size_t exe_size = round_up_with_overflow_check(exe_segment->size, exe_segment->alignment);
   reserve(exe_size, 1);
   const size_t max_align = MAX(alignof(bionic_tcb), exe_segment->alignment);
+#endif
   offset_bionic_tcb_ = reserve(sizeof(bionic_tcb), max_align);
   return offset_bionic_tcb_ - exe_size;
 
@@ -146,7 +184,11 @@ size_t StaticTlsLayout::reserve_exe_segment_and_tcb(const TlsSegment* exe_segmen
   offset_bionic_tcb_ = reserve(sizeof(bionic_tcb), 1);
 
   // Then reserve the segment itself.
+#if ANDROID_VERSION_MAJOR >= 16
+  const size_t exe_size = round_up_with_overflow_check(exe_segment->aligned_size.size, exe_segment->aligned_size.align.value);
+#else
   const size_t exe_size = round_up_with_overflow_check(exe_segment->size, exe_segment->alignment);
+#endif
   return reserve(exe_size, 1);
 
 #else
@@ -154,6 +196,16 @@ size_t StaticTlsLayout::reserve_exe_segment_and_tcb(const TlsSegment* exe_segmen
 #endif
 }
 
+#if ANDROID_VERSION_MAJOR >= 16
+size_t StaticTlsLayout::reserve_bionic_tls() {
+  offset_bionic_tls_ = reserve_type<bionic_tls>();
+  return offset_bionic_tls_;
+}
+
+void StaticTlsLayout::finish_layout() {
+  cursor_ = round_up_with_overflow_check(cursor_, align_);
+}
+#else
 void StaticTlsLayout::reserve_bionic_tls() {
   offset_bionic_tls_ = reserve_type<bionic_tls>();
 }
@@ -166,7 +218,21 @@ void StaticTlsLayout::finish_layout() {
     async_safe_fatal("error: TLS segments in static TLS overflowed");
   }
 }
+#endif
 
+#if ANDROID_VERSION_MAJOR >= 16
+size_t StaticTlsLayout::reserve(size_t size, size_t alignment) {
+  cursor_ = round_up_with_overflow_check(cursor_, alignment);
+  const size_t result = cursor_;
+  cursor_ += size;
+  align_ = MAX(align_, alignment);
+  return result;
+}
+
+size_t StaticTlsLayout::round_up_with_overflow_check(size_t value, size_t alignment) {
+  return __BIONIC_ALIGN(value, alignment);
+}
+#else
 // The size is not required to be a multiple of the alignment. The alignment
 // must be a positive power-of-two.
 size_t StaticTlsLayout::reserve(size_t size, size_t alignment) {
@@ -183,6 +249,7 @@ size_t StaticTlsLayout::round_up_with_overflow_check(size_t value, size_t alignm
   if (value < old_value) overflowed_ = true;
   return value;
 }
+#endif
 
 // Copy each TLS module's initialization image into a newly-allocated block of
 // static TLS memory. To reduce dirty pages, this function only writes to pages
@@ -311,12 +378,11 @@ __attribute__((noinline)) static void* tls_get_addr_slow_path(const TlsIndex* ti
   void* mod_ptr = dtv->modules[module_idx];
   if (mod_ptr == nullptr) {
     const TlsSegment& segment = modules.module_table[module_idx].segment;
+#if ANDROID_VERSION_MAJOR >= 16
+    mod_ptr = __libc_shared_globals()->tls_allocator.memalign(segment.aligned_size.align.value, segment.aligned_size.size);
+#else
     mod_ptr = __libc_shared_globals()->tls_allocator.memalign(segment.alignment, segment.size);
-    void* mod_ptr = nullptr;
-if (posix_memalign(&mod_ptr, segment.alignment, segment.size) != 0) {
-    // Handle allocation failure
-    mod_ptr = nullptr;
-}
+#endif
     if (segment.init_size > 0) {
       memcpy(mod_ptr, segment.init_ptr, segment.init_size);
     }
@@ -324,8 +390,13 @@ if (posix_memalign(&mod_ptr, segment.alignment, segment.size) != 0) {
 
     // Reports the allocation to the listener, if any.
     if (modules.on_creation_cb != nullptr) {
+#if ANDROID_VERSION_MAJOR >= 16
+      modules.on_creation_cb(mod_ptr,
+                             static_cast<void*>(static_cast<char*>(mod_ptr) + segment.aligned_size.size));
+#else
       modules.on_creation_cb(mod_ptr,
                              static_cast<void*>(static_cast<char*>(mod_ptr) + segment.size));
+#endif
     }
   }
 

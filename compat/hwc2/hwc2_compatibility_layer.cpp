@@ -287,7 +287,8 @@ hwc2_error_t hwc2_compat_display_set_power_mode(hwc2_compat_display_t* display,
 hwc2_error_t hwc2_compat_display_set_vsync_enabled(hwc2_compat_display_t* display,
                                            int enabled)
 {
-    hal::Error error = display->self->setVsyncEnabled(static_cast<hal::Vsync>(enabled));
+    hal::Error error = display->self->setVsyncEnabled(
+        enabled ? hal::Vsync::ENABLE : hal::Vsync::DISABLE);
     return static_cast<hwc2_error_t>(error);
 }
 
