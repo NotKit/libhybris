@@ -186,10 +186,39 @@ cat > $HEADER_PATH/android-config.h << EOF
 /* CONFIG GOES HERE */
 
 #endif
+
+/* Compatibility for clang-specific annotations when building with GCC */
+#ifndef _Nonnull
+#define _Nonnull
+#endif
+#ifndef _Nullable
+#define _Nullable
+#endif
+
+/* Neutralize __INTRODUCED_IN() API level annotations (clang-only) */
+#ifdef __INTRODUCED_IN
+#undef __INTRODUCED_IN
+#endif
+#define __INTRODUCED_IN(x)
+
+#ifdef __INTRODUCED_IN_NO_GUARD_FOR_NDK
+#undef __INTRODUCED_IN_NO_GUARD_FOR_NDK
+#endif
+#define __INTRODUCED_IN_NO_GUARD_FOR_NDK(x)
+
+#ifdef __DEPRECATED_IN
+#undef __DEPRECATED_IN
+#endif
+#define __DEPRECATED_IN(x, ...)
 EOF
 
 extract_headers_to hardware \
     hardware/libhardware/include/hardware
+
+# A16+: lights HAL relocated to include_vendor
+check_header_exists hardware/libhardware/include_vendor/hardware/lights.h && \
+    extract_headers_to hardware \
+        hardware/libhardware/include_vendor/hardware/lights.h
 
 check_header_exists hardware/libhardware_legacy/include/hardware_legacy/vibrator.h && \
     extract_headers_to hardware_legacy \
@@ -209,8 +238,14 @@ extract_headers_to hardware_legacy \
 extract_headers_to cutils \
     system/core/include/cutils
 
-extract_headers_to log \
-    system/core/include/log
+check_header_exists system/core/include/log/log.h && \
+    extract_headers_to log \
+        system/core/include/log
+
+# A16+: liblog moved out of system/core
+check_header_exists system/logging/liblog/include/log/log.h && \
+    extract_headers_to log \
+        system/logging/liblog/include/log
 
 extract_headers_to system \
     system/core/include/system
@@ -219,8 +254,14 @@ check_header_exists system/media/audio/include/system/audio.h && \
     extract_headers_to system \
         system/media/audio/include/system
 
-extract_headers_to android \
-    system/core/include/android
+check_header_exists system/core/include/android/log.h && \
+    extract_headers_to android \
+        system/core/include/android
+
+# A16+: liblog's android/log.h moved out of system/core
+check_header_exists system/logging/liblog/include/android/log.h && \
+    extract_headers_to android \
+        system/logging/liblog/include/android/log.h
 
 check_header_exists bionic/libc/kernel/common/linux/sync.h && \
     extract_headers_to linux \
@@ -264,8 +305,16 @@ check_header_exists system/media/radio/include/system/radio_metadata.h && \
         system/media/radio/include/system/radio_metadata.h
 
 extract_headers_to private \
-    system/core/include/private/android_filesystem_config.h \
     bionic/libc/private
+
+check_header_exists system/core/include/private/android_filesystem_config.h && \
+    extract_headers_to private \
+        system/core/include/private/android_filesystem_config.h
+
+# A16+: android_filesystem_config.h moved into libcutils
+check_header_exists system/core/libcutils/include/private/android_filesystem_config.h && \
+    extract_headers_to private \
+        system/core/libcutils/include/private/android_filesystem_config.h
 
 check_header_exists frameworks/native/libs/nativewindow/include/android/native_window.h && \
     extract_headers_to android \
