@@ -51,6 +51,16 @@ static std::vector<TlsModule> g_tls_modules = {};
 extern "C" ssize_t g_hybris_static_tls_tp_offset = 0;
 extern "C" size_t tls_tp_base = 0;
 
+// hybris: per-thread bionic DTV pointer. Lives in the linker's own
+// initial-exec TLS instead of a raw bionic TLS slot: slots are relative to
+// the glibc thread pointer, and writing e.g. slot 2 (tp+16 on arm64) can
+// alias TLS data of the main executable or an early-loaded library. Being a
+// single pointer, it always fits glibc's static TLS surplus even though the
+// linker is dlopened. The TP offset is exported for the TLSDESC resolvers,
+// which cannot use C-level TLS access.
+extern "C" __attribute__((tls_model("initial-exec"))) __thread void* hybris_dtv_slot = nullptr;
+extern "C" ssize_t g_hybris_dtv_tp_offset = 0;
+
 static size_t get_unused_module_index() {
   for (size_t i = 0; i < g_tls_modules.size(); ++i) {
     if (g_tls_modules[i].soinfo_ptr == nullptr) {

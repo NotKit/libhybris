@@ -30,6 +30,7 @@
 #include <private/bionic_asm.h>
 
 .globl hybris_linker_tls_get_addr
+.hidden g_hybris_dtv_tp_offset
 
 // These resolver functions must preserve every register except x0. They set x0
 // to the offset of the TLS symbol relative to the thread pointer.
@@ -44,7 +45,9 @@ ENTRY_PRIVATE(tlsdesc_resolver_static)
   .cfi_rel_offset x22, 24
 
   mrs x19, tpidr_el0            // __get_tls()
-  ldr x20, [x19, #(TLS_SLOT_DTV * 8)]
+  adrp x20, g_hybris_dtv_tp_offset
+  ldr x20, [x20, :lo12:g_hybris_dtv_tp_offset]
+  ldr x20, [x19, x20]           // hybris DTV slot (&TlsDtv::generation)
 
   cbz x20, .static_fallback     // No DTV? Slow path.
 
@@ -88,12 +91,14 @@ ENTRY_PRIVATE(tlsdesc_resolver_dynamic)
   .cfi_rel_offset x22, 24
 
   mrs x19, tpidr_el0            // __get_tls()
-  ldr x20, [x19, #(TLS_SLOT_DTV * 8)]
+  adrp x20, g_hybris_dtv_tp_offset
+  ldr x20, [x20, :lo12:g_hybris_dtv_tp_offset]
+  ldr x20, [x19, x20]           // hybris DTV slot (&TlsDtv::generation)
 
   ldr x0, [x0, #8]              // TlsDynamicResolverArg*
   ldr x22, [x0]                 // TlsDynamicResolverArg::generation
 
-  cbz x20, .fallback            // hybris: TLS_SLOT_DTV might be uninitialized
+  cbz x20, .fallback            // hybris: DTV slot might be uninitialized
   ldr x21, [x20]                // TlsDtv::generation
 
   cmp x21, x22

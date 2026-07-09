@@ -780,6 +780,10 @@ static const char* get_executable_path() {
 }
 
 void* (*_get_hooked_symbol)(const char *sym, const char *requester);
+
+extern "C" __attribute__((tls_model("initial-exec"))) __thread void* hybris_dtv_slot;
+extern "C" ssize_t g_hybris_dtv_tp_offset;
+
 #ifdef WANT_ARM_TRACING
 void *(*_create_wrapper)(const char *symbol, void *function, int wrapper_type);
 int _wrapping_enabled = 0;
@@ -796,6 +800,12 @@ extern "C" void android_set_hybris_tls_data(ssize_t tp_offset, size_t size) {
 
 extern "C" void android_linker_init(int sdk_version, void* (*get_hooked_symbol)(const char*, const char*), int enable_linker_gdb_support) {
 #endif
+  // hybris: initial-exec TLS offsets are constant across threads, so the
+  // offset of hybris_dtv_slot computed here is valid process-wide. Must be
+  // set before any code with TLS relocations is loaded.
+  g_hybris_dtv_tp_offset = reinterpret_cast<char*>(&hybris_dtv_slot) -
+                           reinterpret_cast<char*>(__get_tls());
+
   // Get a few environment variables.
   const char* LD_DEBUG = getenv("HYBRIS_LD_DEBUG");
   if (LD_DEBUG != nullptr) {
